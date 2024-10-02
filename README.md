@@ -2,7 +2,7 @@
 - 👀 I’m interested in research about wireless communication, including NOMA, machine learning for 5G and beyond
 - 🌱 I’m currently learning Machine Learning for Random Access in NOMA
 - 💞️ I’m looking to collaborate on scientific research and project
-- 📫 How to reach me : rediramli@sju.ac.kr
+- 📫 How to reach me : rediramli@sju.ac.kr , linkedln : https://www.linkedin.com/in/redi-ramli-27572a73/
 - 😄 Pronouns: 
 - ⚡ Fun fact: Let's be nice to everyone, because the world is become smaller and smaller
 
