@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+FlexRIC Data Collector for ML
+Extracts RAN metrics from FlexRIC SQLite database
+"""
+
+import sqlite3
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import json
+import glob
+import os
+
+class FlexRICDataCollector:
+    def __init__(self, db_path="/tmp/xapp_db*"):
+        """Initialize collector with database path"""
+        self.db_path = self.find_latest_db(db_path)
+        print(f"Using database: {self.db_path}")
+        
+    def find_latest_db(self, pattern):
+        """Find the latest xApp database"""
+        db_files = glob.glob(pattern)
+        if not db_files:
+            raise FileNotFoundError(f"No database found matching {pattern}")
+        return max(db_files, key=os.path.getctime)
+    
+    def connect(self):
+        """Connect to SQLite database"""
+        try:
+            self.conn = sqlite3.connect(self.db_path)
+            return self.conn
+        except sqlite3.Error as e:
+            print(f"Database connection error: {e}")
+            return None
+    
+    def get_tables(self):
+        """List all tables in database"""
+        query = "SELECT name FROM sqlite_master WHERE type='table';"
+        df = pd.read_sql_query(query, self.conn)
+        return df['name'].tolist()
+    
+    def get_kpm_metrics(self, limit=1000):
+        """Extract KPM (Key Performance Metrics) data"""
+        try:
+            # KPM metrics typically stored in specific tables
+            query = """
+            SELECT * FROM KPM 
+            ORDER BY tstamp DESC 
+            LIMIT ?
+            """
+            df = pd.read_sql_query(query, self.conn, params=(limit,))
+            return df
+        except Exception as e:
+            print(f"Error getting KPM metrics: {e}")
+            return pd.DataFrame()
+    
+    def get_mac_metrics(self, limit=1000):
+        """Extract MAC layer metrics"""
+        try:
+            query = """
+            SELECT * FROM MAC_UE 
+            ORDER BY tstamp DESC 
+            LIMIT ?
+            """
+            df = pd.read_sql_query(query, self.conn, params=(limit,))
+            return df
+        except Exception as e:
+            print(f"Error getting MAC metrics: {e}")
+            return pd.DataFrame()
+    
+    def get_rlc_metrics(self, limit=1000):
+        """Extract RLC layer metrics"""
+        try:
+            query = """
+            SELECT * FROM RLC_bearer 
+            ORDER BY tstamp DESC 
+            LIMIT ?
+            """
+            df = pd.read_sql_query(query, self.conn, params=(limit,))
+            return df
+        except Exception as e:
+            print(f"Error getting RLC metrics: {e}")
+            return pd.DataFrame()
+    
+    def get_pdcp_metrics(self, limit=1000):
+        """Extract PDCP layer metrics"""
+        try:
+            query = """
+            SELECT * FROM PDCP_bearer 
+            ORDER BY tstamp DESC 
+            LIMIT ?
+            """
+            df = pd.read_sql_query(query, self.conn, params=(limit,))
+            return df
+        except Exception as e:
+            print(f"Error getting PDCP metrics: {e}")
+            return pd.DataFrame()
+    
+    def get_all_metrics(self, limit=1000):
+        """Get all available metrics"""
+        metrics = {}
+        
+        print("Collecting KPM metrics...")
+        metrics['kpm'] = self.get_kpm_metrics(limit)
+        
+        print("Collecting MAC metrics...")
+        metrics['mac'] = self.get_mac_metrics(limit)
+        
+        print("Collecting RLC metrics...")
+        metrics['rlc'] = self.get_rlc_metrics(limit)
+        
+        print("Collecting PDCP metrics...")
+        metrics['pdcp'] = self.get_pdcp_metrics(limit)
+        
+        return metrics
+    
+    def preprocess_for_ml(self, df):
+        """Preprocess data for ML models"""
+        if df.empty:
+            return df
+        
+        # Convert timestamp to datetime
+        if 'tstamp' in df.columns:
+            df['datetime'] = pd.to_datetime(df['tstamp'], unit='us')
+            df['hour'] = df['datetime'].dt.hour
+            df['minute'] = df['datetime'].dt.minute
+            df['second'] = df['datetime'].dt.second
+        
+        # Handle missing values
+        df = df.fillna(0)
+        
+        # Remove non-numeric columns for ML
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        df_ml = df[numeric_cols]
+        
+        return df_ml
+    
+    def export_to_csv(self, metrics, output_dir="./ml_data"):
+        """Export metrics to CSV for ML training"""
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for name, df in metrics.items():
+            if not df.empty:
+                filename = f"{output_dir}/{name}_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                df.to_csv(filename, index=False)
+                print(f"Exported {name} to {filename}")
+    
+    def get_statistics(self, df):
+        """Get basic statistics of the data"""
+        if df.empty:
+            return {}
+        
+        stats = {
+            'count': len(df),
+            'columns': df.columns.tolist(),
+            'numeric_summary': df.describe().to_dict(),
+            'missing_values': df.isnull().sum().to_dict()
+        }
+        return stats
+    
+    def close(self):
+        """Close database connection"""
+        if hasattr(self, 'conn'):
+            self.conn.close()
+
+
+def main():
+    """Example usage"""
+    print("=== FlexRIC Data Collector for ML ===\n")
+    
+    # Initialize collector
+    collector = FlexRICDataCollector()
+    collector.connect()
+    
+    # List available tables
+    print("Available tables:")
+    tables = collector.get_tables()
+    for table in tables:
+        print(f"  - {table}")
+    print()
+    
+    # Collect all metrics
+    print("Collecting metrics...")
+    metrics = collector.get_all_metrics(limit=1000)
+    
+    # Show statistics
+    print("\n=== Data Statistics ===")
+    for name, df in metrics.items():
+        if not df.empty:
+            print(f"\n{name.upper()} Metrics:")
+            print(f"  Rows: {len(df)}")
+            print(f"  Columns: {len(df.columns)}")
+            print(f"  Columns: {df.columns.tolist()}")
+    
+    # Export to CSV
+    print("\n=== Exporting Data ===")
+    collector.export_to_csv(metrics)
+    
+    # Preprocess for ML
+    print("\n=== Preprocessing for ML ===")
+    for name, df in metrics.items():
+        if not df.empty:
+            df_ml = collector.preprocess_for_ml(df)
+            print(f"{name}: {df_ml.shape[0]} rows, {df_ml.shape[1]} features")
+    
+    collector.close()
+    print("\nDone!")
+
+
+if __name__ == "__main__":
+    main()
